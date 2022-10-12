@@ -1,10 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEngine;
-using KModkit;
 
 public class TheRuleScript : MonoBehaviour {
 
@@ -37,6 +35,8 @@ public class TheRuleScript : MonoBehaviour {
 
 		private int pressIndex;
 
+		private bool animating;
+
 		static int moduleIdCounter = 1;
 		int moduleId;
 		private bool moduleSolved;
@@ -45,18 +45,18 @@ public class TheRuleScript : MonoBehaviour {
 				moduleId = moduleIdCounter++;
 
 				foreach(KMSelectable element in rowButtons) {
-						KMSelectable pressedElement = element;
 						element.OnInteract += delegate() {
+								if (moduleSolved || animating) return false;
 								pressIndex = Array.IndexOf(rowButtons, element);
-								ToggleSquare(pressedElement);
+								ToggleSquare();
 								return false;
 						};
 				}
 
 				buttonS.OnInteract += delegate() {
 						buttonS.AddInteractionPunch();
+						if (moduleSolved || animating) return false;
 						StartCoroutine(Check());
-						StopCoroutine(Check());
 						return false;
 				};
 		}
@@ -66,7 +66,7 @@ public class TheRuleScript : MonoBehaviour {
 		}
 
 		void PrintStates() {
-				String printout = "";
+				string printout = "";
 				for(int i = 0; i < 8; i++) {
 						if(rowBools[i]) {
 								printout += "1 ";
@@ -103,7 +103,7 @@ public class TheRuleScript : MonoBehaviour {
 		}
 
 		void PrintSolution() {
-				String printout = "";
+				string printout = "";
 				for(int i = 0; i < 8; i++) {
 						if(rowBoolsCorrect[i]) {
 								printout += "1 ";
@@ -179,10 +179,10 @@ public class TheRuleScript : MonoBehaviour {
 						display.text = ruleNumber.ToString();
 				}
 
-				ruleBinary[0] = (ruleNumber >= 8);
-				ruleBinary[1] = (ruleNumber % 8 >= 4);
-				ruleBinary[2] = (ruleNumber % 4 >= 2);
-				ruleBinary[3] = (ruleNumber % 2 == 1);
+				ruleBinary[0] = ruleNumber >= 8;
+				ruleBinary[1] = ruleNumber % 8 >= 4;
+				ruleBinary[2] = ruleNumber % 4 >= 2;
+				ruleBinary[3] = ruleNumber % 2 == 1;
 
 				Debug.LogFormat("[The Rule #{0}] Rule Number is " + ruleNumber, moduleId);
 				Debug.LogFormat("[The Rule #{0}] (1,1) yields " + ruleNumber / 8, moduleId);
@@ -262,12 +262,13 @@ public class TheRuleScript : MonoBehaviour {
 				}
 		}
 
-		void ToggleSquare(KMSelectable square) {
+		void ToggleSquare() {
 				rowBools[pressIndex + 8] = !rowBools[pressIndex + 8];
 				UpdateSquares();
 		}
 
 		IEnumerator Check() {
+				animating = true;
 				bool correct = true;
 				Debug.LogFormat("[The Rule #{0}] Submitted the following:", moduleId);
 				PrintStates();
@@ -287,6 +288,7 @@ public class TheRuleScript : MonoBehaviour {
 
 				if(correct) {
 						display.text = ":)";
+						moduleSolved = true;
 						GetComponent<KMBombModule>().HandlePass();
 						Debug.LogFormat("[The Rule #{0}] Module solved!", moduleId);
 				} else {
@@ -294,24 +296,36 @@ public class TheRuleScript : MonoBehaviour {
 						Debug.LogFormat("[The Rule #{0}] Incorrect solution, strike given!", moduleId);
 						ResetModule();
 				}
+				animating = false;
 		}
 
 		// TwitchPlays Code
 		#pragma warning disable 414
-    		private string TwitchHelpMessage = "Type '!{0} # # #'' to toggle squares in reading order. Type '!{0} submit' to submit your answer.";
+    		private string TwitchHelpMessage = "Type '!{0} # # #' to toggle squares in reading order. Type '!{0} submit' to submit your answer.";
 		#pragma warning restore 414
 
 		IEnumerator ProcessTwitchCommand(string input) {
 
-				if(Regex.IsMatch(input, @"^\s*submit\s*$", RegexOptions.IgnoreCase)) {
-            yield return null;
-            buttonS.OnInteract();
-            yield break;
-        }
+			if(Regex.IsMatch(input, @"^\s*submit\s*$", RegexOptions.IgnoreCase)) {
+				yield return null;
+				buttonS.OnInteract();
+				bool correct = true;
+				for (int i = 8; i < 26; i++) {
+					if (rowBools[i] != rowBoolsCorrect[i]) {
+						correct = false;
+						break;
+					}
+				}
+				if (!correct)
+					yield return "strike";
+				else
+					yield return "solve";
+				yield break;
+			}
 
 				string[] parameters = input.Split(' ');
 				var buttonsToPress = new List<KMSelectable>();
-        foreach (string param in parameters) {
+				foreach (string param in parameters) {
 						if(param.EqualsIgnoreCase("1")) {
 								buttonsToPress.Add(rowButtons[0]);
 						} else if(param.EqualsIgnoreCase("2")) {
@@ -355,5 +369,38 @@ public class TheRuleScript : MonoBehaviour {
 
 				yield return null;
 				yield return buttonsToPress;
+		}
+
+		IEnumerator TwitchHandleForcedSolve()
+		{
+			if (animating)
+			{
+				bool correct = true;
+				for (int i = 8; i < 26; i++) {
+					if (rowBools[i] != rowBoolsCorrect[i]) {
+						correct = false;
+						break;
+					}
+				}
+				if (!correct)
+				{
+					moduleSolved = true;
+					animating = false;
+					StopAllCoroutines();
+					GetComponent<KMBombModule>().HandlePass();
+					yield break;
+				}
+			}
+			else
+			{
+				for (int i = 8; i < 26; i++) {
+					if (rowBools[i] != rowBoolsCorrect[i]) {
+						rowButtons[i - 8].OnInteract();
+						yield return new WaitForSeconds(0.1f);
+					}
+				}
+				buttonS.OnInteract();
+			}
+			while (!moduleSolved) yield return true;
 		}
 }
